@@ -229,8 +229,83 @@ init python:
         return None
 
 
+    def esdoom_has_mod_files(folder):
+        if not folder or not os.path.isdir(folder):
+            return False
+        for name in (
+            "rkk_esdoom_lib.dll",
+            "rkk_esdoom_lib.so",
+            "freedoom1.wad",
+            "rkk_esdoom.rpy",
+            "rkk_esdoom.rpyc",
+        ):
+            if os.path.isfile(os.path.join(folder, name)):
+                return True
+        return False
+
+
+    def esdoom_transfn(rel):
+        try:
+            path = renpy.loader.transfn(rel)
+        except Exception:
+            return None
+        if path and os.path.isfile(path):
+            return path
+        return None
+
+
     def esdoom_mod_dir():
-        # Same place Everlasting Summer loads every other mod from.
+        # Local install: game/mods/esdoom
+        # Workshop legacy: .../workshop/content/331470/3820835688/
+        # Workshop nested: .../3820835688/mods/esdoom
+        candidates = [
+            os.path.join(renpy.config.gamedir, "mods", "esdoom"),
+        ]
+        for rel in (
+            "mods/esdoom/rkk_esdoom.rpy",
+            "mods/esdoom/rkk_esdoom.rpyc",
+            "rkk_esdoom.rpy",
+            "rkk_esdoom.rpyc",
+            "mods/esdoom/freedoom1.wad",
+            "freedoom1.wad",
+            "mods/esdoom/rkk_esdoom_lib.dll",
+            "rkk_esdoom_lib.dll",
+            "mods/esdoom/rkk_esdoom_lib.so",
+            "rkk_esdoom_lib.so",
+        ):
+            path = esdoom_transfn(rel)
+            if path:
+                candidates.append(os.path.dirname(path))
+        try:
+            candidates.append(os.path.dirname(os.path.abspath(__file__)))
+        except (NameError, TypeError):
+            pass
+        try:
+            basedir = renpy.config.basedir
+            for entry in list(renpy.config.searchpath):
+                folder = entry
+                if not os.path.isabs(folder):
+                    folder = os.path.join(basedir, folder)
+                folder = os.path.abspath(folder)
+                nested = os.path.join(folder, "mods", "esdoom")
+                if esdoom_has_mod_files(nested):
+                    candidates.append(nested)
+                if esdoom_has_mod_files(folder):
+                    candidates.append(folder)
+        except Exception:
+            pass
+
+        seen = set()
+        for folder in candidates:
+            if not folder:
+                continue
+            folder = os.path.abspath(folder)
+            key = folder.replace("\\", "/").lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            if esdoom_has_mod_files(folder):
+                return folder
         return os.path.join(renpy.config.gamedir, "mods", "esdoom")
 
 
@@ -238,15 +313,15 @@ init python:
         name = esdoom_lib_name()
         if not name:
             return None
+
         path = os.path.join(esdoom_mod_dir(), name)
         if os.path.isfile(path):
             return path
-        try:
-            packed = renpy.loader.transfn("mods/esdoom/" + name)
-        except Exception:
-            packed = None
-        if packed and os.path.isfile(packed):
-            return packed
+
+        for rel in ("mods/esdoom/" + name, name):
+            packed = esdoom_transfn(rel)
+            if packed:
+                return packed
         return None
 
 
@@ -349,11 +424,10 @@ init python:
             return None
         path = esdoom_lib_path()
         if not path:
-            if renpy.linux:
-                return u"Oops, rkk_esdoom_lib.so is missing"
-            if renpy.windows:
-                return u"Oops, rkk_esdoom_lib.dll is missing"
-            return u"This ES-DOOM build is for Windows and Linux only"
+            name = esdoom_lib_name()
+            if not name:
+                return u"This ES-DOOM build is for Windows and Linux only"
+            return u"Oops, %s is missing (looked in %s)" % (name, esdoom_mod_dir())
         if renpy.linux and not esdoom_elf_x64(path):
             return u"Oops, rkk_esdoom_lib.so is not an ELF x86_64"
         try:
